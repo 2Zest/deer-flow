@@ -200,6 +200,18 @@ class TestDeduplicateFilename:
         seen = {"data.txt"}
         assert claim_unique_filename("data.txt", seen) == "data_1.txt"
 
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("report.tar.gz", "report_1.tar.gz"),
+            ("backup.tar.bz2", "backup_1.tar.bz2"),
+            ("archive.TAR.XZ", "archive_1.TAR.XZ"),
+        ],
+    )
+    def test_compound_archive_suffix_stays_after_counter(self, name, expected):
+        seen = {name}
+        assert claim_unique_filename(name, seen) == expected
+
 
 # ---------------------------------------------------------------------------
 # validate_path_traversal

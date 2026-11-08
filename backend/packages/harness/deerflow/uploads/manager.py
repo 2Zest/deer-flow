@@ -41,6 +41,15 @@ UPLOAD_STAGING_SUFFIX = ".part"
 UPLOAD_STAGING_MIN_AGE = timedelta(hours=24)
 
 _MAX_FILENAME_BYTES = 255
+_COMPOUND_ARCHIVE_SUFFIXES = (
+    ".tar.gz",
+    ".tar.bz2",
+    ".tar.xz",
+    ".tar.zst",
+    ".tar.lz",
+    ".tar.lzma",
+    ".tar.lzo",
+)
 
 
 def get_uploads_dir(thread_id: str, *, user_id: str | None = None) -> Path:
@@ -99,6 +108,15 @@ def _fit_utf8_bytes(text: str, budget: int) -> str:
     return encoded[:budget].decode("utf-8", errors="ignore")
 
 
+def _split_dedup_name(name: str) -> tuple[str, str]:
+    """Split a filename while keeping known multi-part archive suffixes intact."""
+    folded = name.casefold()
+    for suffix in _COMPOUND_ARCHIVE_SUFFIXES:
+        if folded.endswith(suffix) and len(name) > len(suffix):
+            return name[: -len(suffix)], name[-len(suffix) :]
+    return Path(name).stem, Path(name).suffix
+
+
 def claim_unique_filename(name: str, seen: set[str]) -> str:
     """Generate a case-insensitively unique filename by appending ``_N`` on collision.
 
@@ -122,7 +140,7 @@ def claim_unique_filename(name: str, seen: set[str]) -> str:
     if name.casefold() not in claimed:
         seen.add(name)
         return name
-    stem, suffix = Path(name).stem, Path(name).suffix
+    stem, suffix = _split_dedup_name(name)
     counter = 1
     while True:
         tag = f"_{counter}"
