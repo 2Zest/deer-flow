@@ -8,6 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from deerflow.agents.memory.backends.deermem.deermem.core import (
+    retrieval as retrieval_module,
+)
 from deerflow.agents.memory.backends.deermem.deer_mem import DeerMem
 from deerflow.agents.memory.backends.deermem.deermem.config import DeerMemConfig
 from deerflow.agents.memory.backends.deermem.deermem.core.retrieval import (
@@ -42,6 +45,22 @@ def test_chinese_subphrase_search_uses_jieba_tokenization(tmp_path: Path) -> Non
     try:
         adapter.upsert(_fact("zh", "中文检索支持验证"), scope=scope, path="")
         results = adapter.search("检索", scopes=[scope], top_k=5, mode="fts5", filters=None)
+        assert [item["fact"]["id"] for item in results] == ["zh"]
+    finally:
+        adapter.close()
+
+
+def test_chinese_subphrase_search_uses_bigram_fallback_without_jieba(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(retrieval_module, "_jieba_available", False)
+    adapter = FTS5RetrievalAdapter(tmp_path / "facts.sqlite3")
+    scope = {"userId": "alice", "agentName": "agent-a"}
+    try:
+        adapter.upsert(_fact("zh", "调度器会重试失败的任务"), scope=scope, path="")
+        results = adapter.search(
+            "重试", scopes=[scope], top_k=5, mode="fts5", filters=None
+        )
         assert [item["fact"]["id"] for item in results] == ["zh"]
     finally:
         adapter.close()

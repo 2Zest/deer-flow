@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 # no-arg form so SQLite defaults apply and BM25 is actually scored.
 _CONFIDENCE_WEIGHT = 0.2
 
+_CJK_CHARS = r"\u3400-\u4dbf\u4e00-\u9fff\U00020000-\U0002fa1f"
+_CJK_RUN_RE = re.compile(rf"[{_CJK_CHARS}]+")
+_WORD_RE = re.compile(rf"[a-zA-Z0-9_]+|[{_CJK_CHARS}]+")
+
 
 # ── jieba (optional) ──────────────────────────────────────────────────
 
@@ -57,7 +61,19 @@ def _tokenize(text: str) -> list[str]:
         return []
     if _jieba_available:
         return [t for t in jieba.cut(text) if t.strip()]
-    return [t for t in text.split() if t.strip()]
+    tokens: list[str] = []
+    for whitespace_token in text.split():
+        for token in _WORD_RE.findall(whitespace_token):
+            if _CJK_RUN_RE.fullmatch(token):
+                if len(token) == 1:
+                    tokens.append(token)
+                else:
+                    tokens.extend(
+                        token[index : index + 2] for index in range(len(token) - 1)
+                    )
+            else:
+                tokens.append(token)
+    return tokens
 
 
 # ── FTS5 query preprocessing ──────────────────────────────────────────
