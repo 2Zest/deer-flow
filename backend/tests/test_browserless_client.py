@@ -442,6 +442,11 @@ class TestBrowserlessTools:
         """YAML `timeout_s: off` parses as False; 0.0 would time out every request."""
         assert self._client_with_config({"timeout_s": False}).timeout_s == 30.0
 
+    @pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan"), "0", "-1", "inf", "nan"])
+    def test_non_positive_or_non_finite_timeout_falls_back_to_default(self, timeout):
+        """httpx needs a positive finite deadline; invalid values must not disable it."""
+        assert self._client_with_config({"timeout_s": timeout}).timeout_s == 30.0
+
     @patch("deerflow.community.browserless.tools._get_browserless_client")
     async def test_web_fetch_tool_success(self, mock_get_client):
         """web_fetch_tool successfully fetches and extracts content."""

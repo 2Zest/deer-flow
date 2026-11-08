@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import os
 import re
 from datetime import UTC, datetime
@@ -57,11 +58,19 @@ def _coerce_timeout(value: object, default: float) -> float:
     if isinstance(value, bool):
         return default
     if isinstance(value, (int, float)):
-        return float(value)
+        timeout = float(value)
+        if math.isfinite(timeout) and timeout > 0:
+            return timeout
+        logger.warning("Browserless: invalid timeout %r in config; using %ss", value, default)
+        return default
     if isinstance(value, str):
         try:
-            return float(value)
-        except ValueError:
+            timeout = float(value)
+        except (ValueError, OverflowError):
+            logger.warning("Browserless: invalid timeout %r in config; using %ss", value, default)
+        else:
+            if math.isfinite(timeout) and timeout > 0:
+                return timeout
             logger.warning("Browserless: invalid timeout %r in config; using %ss", value, default)
     return default
 
