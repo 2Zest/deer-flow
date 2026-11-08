@@ -241,6 +241,91 @@ def _slice_byte_range(content: bytes, range_header: str | None) -> tuple[bytes, 
     return ranged_content, 206, headers
 
 
+def _read_conditional_artifact_range(
+    actual_path: Path,
+    request: Request,
+    *,
+    etag: str,
+    mime_type: str | None,
+    headers: dict[str, str],
+) -> Response | None:
+    """Read a matching conditional range from one opened file generation.
+
+    ``FileResponse`` re-opens a path after ASGI response headers are sent. If a
+    generated artifact is atomically replaced in that window, a valid If-Range
+    request can combine the old validator with bytes from the new inode. Read
+    matching conditional ranges before returning the response so the selected
+    file handle remains the source of both the validator and the body.
+    """
+    range_header = request.headers.get("range")
+    if not range_header or request.headers.get("if-range") != etag:
+        return None
+
+    # If the file changed between the route's metadata probe and this helper,
+    # refresh the validator and let the normal full-file path serve the new
+    # generation instead of pairing it with a stale ETag.
+    current_etag = _artifact_etag(actual_path)
+    if current_etag != etag:
+        headers["ETag"] = current_etag
+        return None
+
+    try:
+        with actual_path.open("rb") as handle:
+            size = os.fstat(handle.fileno()).st_size
+            if not range_header.startswith("bytes=") or "," in range_header:
+                raise HTTPException(
+                    status_code=416,
+                    detail="Requested range is not satisfiable",
+                    headers={"Accept-Ranges": "bytes", "Content-Range": f"bytes */{size}"},
+                )
+            range_spec = range_header.removeprefix("bytes=")
+            if "-" not in range_spec:
+                raise HTTPException(
+                    status_code=416,
+                    detail="Requested range is not satisfiable",
+                    headers={"Accept-Ranges": "bytes", "Content-Range": f"bytes */{size}"},
+                )
+            start_text, end_text = range_spec.split("-", 1)
+            try:
+                if start_text:
+                    start = int(start_text)
+                    end = size - 1 if not end_text else min(int(end_text), size - 1)
+                else:
+                    suffix_length = int(end_text)
+                    if suffix_length <= 0:
+                        raise ValueError
+                    start = max(size - suffix_length, 0)
+                    end = size - 1
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=416,
+                    detail="Requested range is not satisfiable",
+                    headers={"Accept-Ranges": "bytes", "Content-Range": f"bytes */{size}"},
+                ) from exc
+            if size == 0 or start < 0 or start >= size or end < start:
+                raise HTTPException(
+                    status_code=416,
+                    detail="Requested range is not satisfiable",
+                    headers={"Accept-Ranges": "bytes", "Content-Range": f"bytes */{size}"},
+                )
+            handle.seek(start)
+            content = handle.read(end - start + 1)
+    except FileNotFoundError:
+        return None
+
+    range_headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Range": f"bytes {start}-{end}/{size}",
+        "Content-Length": str(len(content)),
+    }
+    return Response(
+        content=content,
+        status_code=206,
+        media_type=mime_type,
+        headers={**headers, **range_headers},
+    )
+
+
 def _read_skill_archive_member(zip_ref: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
     """Read a .skill archive member while enforcing an uncompressed size cap."""
     if info.file_size > MAX_SKILL_ARCHIVE_MEMBER_BYTES:
@@ -511,6 +596,16 @@ async def get_artifact(thread_id: ThreadId, path: str, request: Request, downloa
         # execution in the application origin when users open generated artifacts.
         headers = {**_build_attachment_headers(actual_path.name)}
         headers["ETag"] = await asyncio.to_thread(_artifact_etag, actual_path)
+        conditional_range = await asyncio.to_thread(
+            _read_conditional_artifact_range,
+            actual_path,
+            request,
+            etag=headers["ETag"],
+            mime_type=mime_type,
+            headers=headers,
+        )
+        if conditional_range is not None:
+            return conditional_range
         return _ArtifactFileResponse(
             path=actual_path,
             filename=actual_path.name,
@@ -522,6 +617,16 @@ async def get_artifact(thread_id: ThreadId, path: str, request: Request, downloa
         # FileResponse honors byte-Range requests for large text previews and
         headers = {"Content-Disposition": _build_content_disposition("inline", actual_path.name), "X-Content-Type-Options": "nosniff"}
         headers["ETag"] = await asyncio.to_thread(_artifact_etag, actual_path)
+        conditional_range = await asyncio.to_thread(
+            _read_conditional_artifact_range,
+            actual_path,
+            request,
+            etag=headers["ETag"],
+            mime_type=mime_type,
+            headers=headers,
+        )
+        if conditional_range is not None:
+            return conditional_range
         return _ArtifactFileResponse(
             path=actual_path,
             media_type=mime_type,

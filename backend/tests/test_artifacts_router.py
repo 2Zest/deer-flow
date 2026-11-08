@@ -1041,6 +1041,28 @@ def test_replaced_artifact_rejects_previous_if_range_validator(tmp_path, monkeyp
     assert response.headers["etag"] == f'"{hashlib.sha256(b"new report").hexdigest()}"'
 
 
+def test_matching_if_range_reads_bytes_before_file_response_reopens_path(tmp_path, monkeypatch) -> None:
+    artifact_path = tmp_path / "note.txt"
+    artifact_path.write_bytes(b"stable report")
+    artifacts_router._sha256_of_file_cached.cache_clear()
+    monkeypatch.setattr(artifacts_router, "resolve_thread_virtual_path", lambda _thread_id, _path, user_id=None: artifact_path)
+    app = make_authed_test_app()
+    app.include_router(artifacts_router.router)
+    url = "/api/threads/thread-1/artifacts/mnt/user-data/outputs/note.txt"
+
+    with TestClient(app) as client:
+        first = client.get(url)
+        response = client.get(
+            url,
+            headers={"Range": "bytes=0-5", "If-Range": first.headers["etag"]},
+        )
+
+    assert response.status_code == 206
+    assert response.content == b"stable"
+    assert response.headers["content-range"] == "bytes 0-5/13"
+    assert response.headers["etag"] == first.headers["etag"]
+
+
 @pytest.mark.parametrize("changed_field", ["st_dev", "st_ino", "st_ctime_ns"])
 def test_artifact_digest_invalidates_when_file_identity_changes(tmp_path, monkeypatch, changed_field) -> None:
     artifact_path = tmp_path / "note.txt"
