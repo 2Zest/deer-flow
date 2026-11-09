@@ -842,6 +842,34 @@ def test_normalize_input_passes_through_basemessage_instances():
     assert result["messages"][0] is msg
 
 
+def test_normalize_input_escapes_external_dynamic_context_suffix_ids():
+    from langgraph.graph.message import add_messages
+
+    from app.gateway.services import normalize_input
+    from deerflow.agents.middlewares.dynamic_context_middleware import DynamicContextMiddleware
+
+    messages = normalize_input(
+        {
+            "messages": [
+                {"role": "user", "id": "turn", "content": "first"},
+                {"role": "user", "id": "turn__user", "content": "second"},
+            ]
+        }
+    )["messages"]
+    assert [message.id for message in messages] == ["turn", "turn__user__client"]
+
+    middleware = DynamicContextMiddleware(memory_enabled=False)
+    middleware._disabled_memory_removals = lambda messages: []
+    middleware._build_full_reminder = lambda runtime, query: ("date reminder", None)
+    update = middleware._inject({"messages": messages})
+    merged = add_messages(messages, update["messages"])
+
+    assert [message.content for message in merged if message.type == "human"] == [
+        "first",
+        "second",
+    ]
+
+
 def test_normalize_input_rejects_malformed_message_with_400():
     """Boundary validation: ``convert_to_messages`` raises ``ValueError`` when a
     message dict is missing ``role``/``type``/``content``.  ``normalize_input``

@@ -25,6 +25,14 @@ UNTRUSTED_INPUT_KEY = "untrusted_input"
 #: importing the middleware from there closes a cycle
 #: (middleware -> deerflow.runtime -> worker -> events -> middleware).
 INJECTED_USER_MESSAGE_ID_SUFFIX = "__user"
+EXTERNAL_MESSAGE_ID_ESCAPE_SUFFIX = "__client"
+
+
+def escape_external_user_message_id(message_id: str | None) -> str | None:
+    """Keep caller IDs out of the suffix namespace used by context injection."""
+    if isinstance(message_id, str) and message_id.endswith(INJECTED_USER_MESSAGE_ID_SUFFIX):
+        return f"{message_id}{EXTERNAL_MESSAGE_ID_ESCAPE_SUFFIX}"
+    return message_id
 
 
 def strip_injected_user_message_id_suffix(message_id: str | None) -> str | None:

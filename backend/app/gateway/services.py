@@ -115,7 +115,11 @@ from deerflow.trace_context import DEERFLOW_TRACE_METADATA_KEY, ensure_trace_con
 from deerflow.utils.assembly_io import run_assembly
 from deerflow.utils.file_io import await_drained
 from deerflow.utils.goal_objective import normalize_goal_objective
-from deerflow.utils.messages import ORIGINAL_USER_CONTENT_KEY, UNTRUSTED_INPUT_KEY
+from deerflow.utils.messages import (
+    ORIGINAL_USER_CONTENT_KEY,
+    UNTRUSTED_INPUT_KEY,
+    escape_external_user_message_id,
+)
 from deerflow.utils.thread_id import validate_thread_id
 
 logger = logging.getLogger(__name__)
@@ -637,6 +641,10 @@ def _normalize_input_messages(
                     detail=(f"External system/developer messages are not allowed at {location}[{index}]"),
                 )
             message = _strip_external_message_metadata(message)
+            if isinstance(message, HumanMessage):
+                escaped_id = escape_external_user_message_id(message.id)
+                if escaped_id != message.id:
+                    message = message.model_copy(update={"id": escaped_id})
         converted.append(message)
     return converted
 
