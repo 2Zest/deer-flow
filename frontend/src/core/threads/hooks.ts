@@ -1911,7 +1911,18 @@ export async function stopThreadAndInvalidateCaches(
   }
 }
 
-function getStreamErrorMessage(error: unknown): string {
+export function getStreamErrorMessage(
+  error: unknown,
+  formatServerError: (status: number) => string = (status) =>
+    `Service temporarily unavailable (HTTP ${status}).`,
+): string {
+  const status =
+    typeof error === "object" && error !== null
+      ? Reflect.get(error, "status")
+      : undefined;
+  if (typeof status === "number" && status >= 500 && status < 600) {
+    return formatServerError(status);
+  }
   if (typeof error === "string" && error.trim()) {
     return error;
   }
@@ -2342,7 +2353,13 @@ export function useThreadStream({
       pendingPreparedReplayRef.current = null;
       setPendingSupersededRunIds(new Set());
       setPendingSupersededMessageIds(new Set());
-      toast.error(getStreamErrorMessage(error));
+      toast.error(
+        getStreamErrorMessage(
+          error,
+          (status) =>
+            `${t.login.serviceUnavailableTitle} (HTTP ${status}). ${t.login.serviceUnavailableDescription}`,
+        ),
+      );
       pendingUsageBaselineMessageIdsRef.current = new Set(
         messagesRef.current
           .map(messageIdentity)
@@ -3141,7 +3158,13 @@ export function useThreadStream({
             removeSetItems(current, preparedSupersededMessageIds),
           );
         }
-        toast.error(getStreamErrorMessage(error));
+        toast.error(
+          getStreamErrorMessage(
+            error,
+            (status) =>
+              `${t.login.serviceUnavailableTitle} (HTTP ${status}). ${t.login.serviceUnavailableDescription}`,
+          ),
+        );
         return false;
       } finally {
         sendInFlightRef.current = false;
@@ -3154,6 +3177,8 @@ export function useThreadStream({
       persistedMessages,
       queryClient,
       thread,
+      t.login.serviceUnavailableDescription,
+      t.login.serviceUnavailableTitle,
       visibleHistory,
     ],
   );
